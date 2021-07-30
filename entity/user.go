@@ -8,3 +8,9 @@ type User struct {
 	Created_time  string  `json:"created_time"`
 	Modified_time string  `json:"modified_time"`
 }
+type ChangeBalance struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Amount   float64 `json:"amount"`
+	TargetId string  `json:"targetId"`
+}
