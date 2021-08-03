@@ -26,6 +26,7 @@ func initaliseHandlers(router *mux.Router) {
 	router.HandleFunc("/get/{id}", controllers.GetUserByID).Methods("GET")
 	router.HandleFunc("/update/{id}", controllers.UpdateUserByID).Methods("PUT")
 	router.HandleFunc("/delete/{id}", controllers.DeleteUserByID).Methods("DELETE")
+	router.HandleFunc("/delete", controllers.DeleteUserByID).Methods("DELETE")
 	router.HandleFunc("/withdraw/{id}", controllers.UserWithdraw).Methods("PUT")
 	router.HandleFunc("/deposit/{id}", controllers.UserDeposit).Methods("PUT")
 	router.HandleFunc("/transfer", controllers.UserTransfer).Methods("PUT")
