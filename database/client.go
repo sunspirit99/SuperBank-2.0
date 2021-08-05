@@ -5,10 +5,29 @@ import (
 	"rest-go-demo/entity"
 
 	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
 )
 
 //Connector variable used for CRUD operation's
 var Connector *gorm.DB
+
+// init function will be called when the package is imported
+func init() {
+	config :=
+		Config{
+			ServerName: "127.0.0.1:3306",
+			User:       "root",
+			Password:   "Sunspirit9.9",
+			DB:         "Bank",
+		}
+
+	connectionString := GetConnectionString(config)
+	err := Connect(connectionString)
+	if err != nil {
+		panic(err.Error())
+	}
+	Migrate(&entity.User{})
+}
 
 //Connect creates MySQL connection
 func Connect(connectionString string) error {
