@@ -52,14 +52,15 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	requestBody, _ := ioutil.ReadAll(r.Body)
 	var user entity.User
 	json.Unmarshal(requestBody, &user)
-
+	t := time.Now()
 	error := database.Connector.Create(user).Error
 	if error != nil {
-		fmt.Println("ban chua nhap du lieu")
+		fmt.Println("Fill your correct info to continue")
+	} else {
+		user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
+		user.Modified_time = ""
+		fmt.Printf("\n Created an account complete at %v", user.Created_time)
 	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
 
 	//nhap thieu du lieu
 	//nhap rong
@@ -71,9 +72,13 @@ func UpdateUserByID(w http.ResponseWriter, r *http.Request) {
 	requestBody, _ := ioutil.ReadAll(r.Body)
 	var user entity.User
 	json.Unmarshal(requestBody, &user)
+	t := time.Now()
 	error := database.Connector.Save(&user).Error
 	if error != nil {
 		fmt.Println("Error")
+	} else {
+		user.Modified_time = fmt.Sprintf(t.Format("2020-01-02 15:04:05"))
+		fmt.Printf("\n Updating complete at %v", user.Modified_time)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -124,7 +129,7 @@ func UserWithdraw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user entity.User
-	database.Connector.First(&user, cb.ID)
+	database.Connector.Where(`id =? AND name=?`, cb.ID, cb.Name).First(&user)
 	if user.Balance < minBalance {
 		fmt.Println("You dont have enough money to withdraw !")
 		return
@@ -139,8 +144,8 @@ func UserWithdraw(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("you have successfully withdrew", cb.Amount, "from your account !")
 	}
 
-	t := time.Now()                                      //set thoi gian hien tai
-	user.Modified_time = t.Format("2020-01-02 15:04:05") //truyen vao
+	//t := time.Now()                                      //set thoi gian hien tai
+	//user.Modified_time = t.Format("2020-01-02 15:04:05") //truyen vao
 
 	database.Connector.Save(&user)
 	w.Header().Set("Content-Type", "application/json")
@@ -163,7 +168,7 @@ func UserDeposit(w http.ResponseWriter, r *http.Request) {
 		fmt.Print("error")
 	}
 	var user entity.User
-	database.Connector.First(&user, cb.ID)
+	database.Connector.Where(`id =? AND name=?`, cb.ID, cb.Name).First(&user)
 
 	if cb.Amount < minCost {
 		fmt.Println("The minimum amount to perform a transaction is", minCost, "!")
@@ -173,8 +178,8 @@ func UserDeposit(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("you have successfully deposited", cb.Amount, "to your account !")
 	}
 
-	t := time.Now()                                      //set thoi gian hien tai
-	user.Modified_time = t.Format("2020-01-02 15:04:05") // truyen vao
+	//t := time.Now()                                      //set thoi gian hien tai
+	//user.Modified_time = t.Format("2020-01-02 15:04:05") // truyen vao
 
 	database.Connector.Save(&user)
 	w.Header().Set("Content-type", "application/json")
