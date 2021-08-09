@@ -1,5 +1,3 @@
-package controllers
-
 import (
 	"bytes"
 	"fmt"

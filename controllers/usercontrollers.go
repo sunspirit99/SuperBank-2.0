@@ -1,10 +1,16 @@
 package controllers
 
 import (
+	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+
 	"io/ioutil"
 	"net/http"
+	"os"
 	"rest-go-demo/database"
 	"rest-go-demo/entity"
 	"strconv"
@@ -52,17 +58,36 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	requestBody, _ := ioutil.ReadAll(r.Body)
 	var user entity.User
 	json.Unmarshal(requestBody, &user)
-
+	t := time.Now()
 	error := database.Connector.Create(user).Error
 	if error != nil {
-		fmt.Println("ban chua nhap du lieu")
+		fmt.Println("Fill your correct info to continue")
+	} else {
+		user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
+		user.Modified_time = ""
+		fmt.Printf("\n Created an account complete at %v", user.Created_time)
 	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
 
 	//nhap thieu du lieu
 	//nhap rong
+
+}
+
+func CreateUserFromCSV(w http.ResponseWriter, r *http.Request) {
+	// Open the CSV file for reading
+
+	var users = LoadUsersCSV()
+	for _, user := range users {
+		t := time.Now()
+		user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
+		user.Modified_time = ""
+		error := database.Connector.Create(user).Error
+		if error != nil {
+			fmt.Println("Fill your correct info to continue")
+		} else {
+			fmt.Printf("\n Created an account complete at %v", user.Created_time)
+		}
+	}
 
 }
 
@@ -71,9 +96,13 @@ func UpdateUserByID(w http.ResponseWriter, r *http.Request) {
 	requestBody, _ := ioutil.ReadAll(r.Body)
 	var user entity.User
 	json.Unmarshal(requestBody, &user)
+	t := time.Now()
 	error := database.Connector.Save(&user).Error
 	if error != nil {
 		fmt.Println("Error")
+	} else {
+		user.Modified_time = fmt.Sprintf(t.Format("2020-01-02 15:04:05"))
+		fmt.Printf("\n Updating complete at %v", user.Modified_time)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -124,7 +153,10 @@ func UserWithdraw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user entity.User
-	database.Connector.First(&user, cb.ID)
+	error := database.Connector.Where(`id =? AND name=?`, cb.ID, cb.Name).First(&user).Error
+	if error != nil {
+		panic("Query error !!!")
+	}
 	if user.Balance < minBalance {
 		fmt.Println("You dont have enough money to withdraw !")
 		return
@@ -139,8 +171,8 @@ func UserWithdraw(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("you have successfully withdrew", cb.Amount, "from your account !")
 	}
 
-	t := time.Now()                                      //set thoi gian hien tai
-	user.Modified_time = t.Format("2020-01-02 15:04:05") //truyen vao
+	//t := time.Now()                                      //set thoi gian hien tai
+	//user.Modified_time = t.Format("2020-01-02 15:04:05") //truyen vao
 
 	database.Connector.Save(&user)
 	w.Header().Set("Content-Type", "application/json")
@@ -163,8 +195,10 @@ func UserDeposit(w http.ResponseWriter, r *http.Request) {
 		fmt.Print("error")
 	}
 	var user entity.User
-	database.Connector.First(&user, cb.ID)
-
+	error := database.Connector.Where(`id =? AND name=?`, cb.ID, cb.Name).First(&user).Error
+	if error != nil {
+		panic("Query error !!!")
+	}
 	if cb.Amount < minCost {
 		fmt.Println("The minimum amount to perform a transaction is", minCost, "!")
 		return
@@ -173,8 +207,8 @@ func UserDeposit(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("you have successfully deposited", cb.Amount, "to your account !")
 	}
 
-	t := time.Now()                                      //set thoi gian hien tai
-	user.Modified_time = t.Format("2020-01-02 15:04:05") // truyen vao
+	//t := time.Now()                                      //set thoi gian hien tai
+	//user.Modified_time = t.Format("2020-01-02 15:04:05") // truyen vao
 
 	database.Connector.Save(&user)
 	w.Header().Set("Content-type", "application/json")
@@ -195,8 +229,20 @@ func UserTransfer(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(requestBody, &cb)
 
 	var users []entity.User
-	trans := []int64{cb.ID, cb.TargetId} //id la tk chuyen , targetId la tk nhan
-	database.Connector.Find(&users, trans)
+	var user1 entity.User
+	var user2 entity.User
+
+	if cb.ID == cb.TargetId {
+		panic("Please enter correct recipient ID !")
+	}
+
+	err1 := database.Connector.Where(`id =? AND name=?`, cb.ID, cb.Name).First(&user1).Error
+	err2 := database.Connector.Where(`id =? `, cb.TargetId).First(&user2).Error
+	if err1 != nil || err2 != nil {
+		panic("Please enter correct information !")
+	}
+	users = append(users, user1, user2)
+	fmt.Println(users)
 	if users[0].Balance < minBalance {
 		fmt.Println("You dont have enough money to transfer !")
 		return
@@ -209,7 +255,7 @@ func UserTransfer(w http.ResponseWriter, r *http.Request) {
 	} else {
 		Withdraw(&users[0], cb.Amount)
 		Deposit(&users[1], cb.Amount)
-		fmt.Println("you have successfully transferred", cb.Amount, "to id :", cb.TargetId, "!")
+		fmt.Println("you [ID :", cb.ID, "] have successfully transferred", cb.Amount, "to [ID :", cb.TargetId, "] !")
 	}
 	t := time.Now()
 	users[0].Modified_time = t.Format("2006-01-02 15:04:05")
@@ -224,6 +270,54 @@ func UserTransfer(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func UserTransferFromCSV(w http.ResponseWriter, r *http.Request) {
+
+	trans := LoadTransactionsCSV()
+
+	for _, tran := range trans {
+		if tran.ID == tran.TargetId {
+			panic("Please enter correct recipient ID !")
+		}
+		var users []entity.User
+		var user1 entity.User
+		var user2 entity.User
+
+		err1 := database.Connector.Where(`id =? AND name=?`, tran.ID, tran.Name).First(&user1).Error
+		err2 := database.Connector.Where(`id =? `, tran.TargetId).First(&user2).Error
+		if err1 != nil || err2 != nil {
+			fmt.Println("Please enter correct information !")
+			continue
+		}
+		users = append(users, user1, user2)
+		if users[0].Balance < minBalance {
+			fmt.Println("You dont have enough money to transfer !")
+			return
+		} else if users[0].Balance-tran.Amount < minBalance {
+			fmt.Println("The maximum amount that can be transferred is", users[0].Balance-minBalance, "!")
+			return
+		} else if tran.Amount < minCost {
+			fmt.Println("The minimum amount that can be transferred is", minCost, "!")
+			return
+		} else {
+			Withdraw(&users[0], tran.Amount)
+			Deposit(&users[1], tran.Amount)
+			fmt.Println("you [ID :", tran.ID, "] have successfully transferred", tran.Amount, "to [ID :", tran.TargetId, "] !")
+		}
+		t := time.Now()
+		users[0].Modified_time = t.Format("2006-01-02 15:04:05")
+		users[1].Modified_time = t.Format("2006-01-02 15:04:05")
+
+		database.Connector.Save(&users[0]) //save vao db
+		database.Connector.Save(&users[1])
+
+		w.Header().Set("Content-Type", "application/json")
+
+		json.NewEncoder(w).Encode(users)
+	}
+	w.WriteHeader(http.StatusOK)
+
+}
+
 // check withdraw amount and withdrawal function
 func Withdraw(user *entity.User, num float64) {
 	user.Balance = user.Balance - num
@@ -232,4 +326,64 @@ func Withdraw(user *entity.User, num float64) {
 //check deposit amount and deposit function
 func Deposit(user *entity.User, num float64) {
 	user.Balance = user.Balance + num
+}
+
+func LoadUsersCSV() []entity.User {
+	var users []entity.User
+	file, _ := os.Open("users.csv")
+	reader := csv.NewReader(bufio.NewReader(file))
+	for {
+		line, err := reader.Read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Fatal(err)
+		}
+		id, err := strconv.ParseInt(line[0], 0, 64)
+		balance, err := strconv.ParseFloat(line[2], 64)
+
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(2)
+		}
+
+		users = append(users, entity.User{
+			ID:            id,
+			Name:          line[1],
+			Balance:       balance,
+			Created_time:  line[3],
+			Modified_time: line[4],
+		})
+	}
+	return users
+}
+
+func LoadTransactionsCSV() []entity.ChangeBalance {
+	var trans []entity.ChangeBalance
+	file, _ := os.Open("transactions.csv")
+	reader := csv.NewReader(bufio.NewReader(file))
+	for {
+		line, err := reader.Read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Fatal(err)
+		}
+		id, err := strconv.ParseInt(line[0], 0, 64)
+		balance, err := strconv.ParseFloat(line[2], 64)
+		targetId, err := strconv.ParseInt(line[3], 0, 64)
+
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(2)
+		}
+
+		trans = append(trans, entity.ChangeBalance{
+			ID:       id,
+			Name:     line[1],
+			Amount:   balance,
+			TargetId: targetId,
+		})
+	}
+	return trans
 }

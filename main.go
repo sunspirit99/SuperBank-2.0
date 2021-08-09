@@ -20,6 +20,8 @@ func main() {
 
 func initaliseHandlers(router *mux.Router) {
 	router.HandleFunc("/create", controllers.CreateUser).Methods("POST")
+	router.HandleFunc("/creates", controllers.CreateUserFromCSV).Methods("POST")
+	router.HandleFunc("/transfer", controllers.UserTransfer).Methods("PUT")
 	router.HandleFunc("/get", controllers.GetAllUser).Methods("GET")
 	router.HandleFunc("/get/{id}", controllers.GetUserByID).Methods("GET")
 	router.HandleFunc("/update", controllers.UpdateUserByID).Methods("PUT")
@@ -28,6 +30,8 @@ func initaliseHandlers(router *mux.Router) {
 	router.HandleFunc("/withdraw", controllers.UserWithdraw).Methods("PUT")
 	router.HandleFunc("/deposit", controllers.UserDeposit).Methods("PUT")
 	router.HandleFunc("/transfer", controllers.UserTransfer).Methods("PUT")
+	router.HandleFunc("/transfers", controllers.UserTransferFromCSV).Methods("PUT")
+
 }
 
 // func InitDB() {
