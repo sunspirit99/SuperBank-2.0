@@ -4,8 +4,11 @@ import (
 	"log"
 	"rest-go-demo/entity"
 
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
+	// "github.com/jinzhu/gorm"
+	// "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 //Connector variable used for CRUD operation's
@@ -32,7 +35,8 @@ func init() {
 //Connect creates MySQL connection
 func Connect(connectionString string) error {
 	var err error
-	Connector, err = gorm.Open("mysql", connectionString)
+	dsn := "root:Sunspirit9.9@tcp(127.0.0.1:3306)/Bank?charset=utf8mb4&parseTime=True&loc=Local"
+	Connector, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return err
 	}

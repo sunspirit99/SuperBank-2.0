@@ -6,9 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"rest-go-demo/database"
@@ -21,13 +20,14 @@ import (
 
 const minBalance float64 = 5000
 const minCost float64 = 1000
+const batchsize int = 1000
 
 //GetAllPerson get all user data
 func GetAllUser(w http.ResponseWriter, r *http.Request) {
 	var users []entity.User
 	error := database.Connector.Find(&users).Error
 	if error != nil {
-		fmt.Println("Error")
+		fmt.Println("Error !")
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -47,7 +47,9 @@ func GetUserByID(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Error")
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(user)
+
 	//truong hop id rong
 	//truong hop id k co trong db
 }
@@ -58,15 +60,20 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	requestBody, _ := ioutil.ReadAll(r.Body)
 	var user entity.User
 	json.Unmarshal(requestBody, &user)
+
 	t := time.Now()
+	user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
+	user.Modified_time = ""
 	error := database.Connector.Create(user).Error
+	// error := database.Connector.CreateInBatches(user, 100).Error
 	if error != nil {
-		fmt.Println("Fill your correct info to continue")
+		fmt.Println("Fill your correct info to continue !")
 	} else {
-		user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
-		user.Modified_time = ""
 		fmt.Printf("\n Created an account complete at %v", user.Created_time)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(user)
 	}
+	w.WriteHeader(http.StatusCreated)
 
 	//nhap thieu du lieu
 	//nhap rong
@@ -76,18 +83,28 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 func CreateUserFromCSV(w http.ResponseWriter, r *http.Request) {
 	// Open the CSV file for reading
 
+	fmt.Println("Processing !!!")
+	start1 := time.Now()
 	var users = LoadUsersCSV()
-	for _, user := range users {
-		t := time.Now()
-		user.Created_time = fmt.Sprintf("%v", t.Format("2020-01-02 15:04:05"))
-		user.Modified_time = ""
-		error := database.Connector.Create(user).Error
-		if error != nil {
-			fmt.Println("Fill your correct info to continue")
-		} else {
-			fmt.Printf("\n Created an account complete at %v", user.Created_time)
-		}
+	end1 := time.Since(start1)
+
+	start2 := time.Now()
+	error := database.Connector.Statement.CreateInBatches(users, batchsize).Error
+
+	if error != nil {
+		fmt.Println("Fill your correct info to continue")
+		// continue
 	}
+
+	fmt.Printf("\n Created 100.000 accounts complete at %v", time.Now())
+
+	// w.Header().Set("Content-Type", "application/json")
+	// json.NewEncoder(w).Encode(user)
+
+	// }
+	end2 := time.Since(start2)
+	fmt.Printf("\n Time to read data from CSV file is : %v \n Time to write to DB is : %v \n", end1, end2)
+	w.WriteHeader(http.StatusOK)
 
 }
 
@@ -107,7 +124,7 @@ func UpdateUserByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(user)
-	fmt.Println("Update person success")
+	fmt.Println("Update user successfully !")
 	//nhap thieu du lieu
 	//nhap sai du lieu
 
@@ -330,7 +347,7 @@ func Deposit(user *entity.User, num float64) {
 
 func LoadUsersCSV() []entity.User {
 	var users []entity.User
-	file, _ := os.Open("users.csv")
+	file, _ := os.Open("users-100k.csv")
 	reader := csv.NewReader(bufio.NewReader(file))
 	for {
 		line, err := reader.Read()
