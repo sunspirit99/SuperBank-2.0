@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	// InitDB()
+
 	log.Println("Starting the HTTP server on port 8000")
 
 	router := mux.NewRouter().StrictSlash(true)
@@ -33,20 +33,3 @@ func initaliseHandlers(router *mux.Router) {
 	router.HandleFunc("/transfers", controllers.UserTransferFromCSV).Methods("PUT")
 
 }
-
-// func InitDB() {
-// 	config :=
-// 		database.Config{
-// 			ServerName: "127.0.0.1:3306",
-// 			User:       "nampkh",
-// 			Password:   "password",
-// 			DB:         "data1",
-// 		}
-
-// 	connectionString := database.GetConnectionString(config)
-// 	err := database.Connect(connectionString)
-// 	if err != nil {
-// 		panic(err.Error())
-// 	}
-// 	database.Migrate(&entity.User{})
-// }

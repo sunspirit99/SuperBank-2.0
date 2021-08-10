@@ -4,14 +4,13 @@ import (
 	"log"
 	"rest-go-demo/entity"
 
-	// "github.com/jinzhu/gorm"
-	// "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
-
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	// "github.com/jinzhu/gorm"
+	// "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
 )
 
-//Connector variable used for CRUD operation's
+// Connector variable
 var Connector *gorm.DB
 
 // init function will be called when the package is imported
@@ -32,7 +31,7 @@ func init() {
 	Migrate(&entity.User{})
 }
 
-//Connect creates MySQL connection
+// Connect creates MySQL connection
 func Connect(connectionString string) error {
 	var err error
 	dsn := "root:Sunspirit9.9@tcp(127.0.0.1:3306)/Bank?charset=utf8mb4&parseTime=True&loc=Local"
@@ -44,7 +43,7 @@ func Connect(connectionString string) error {
 	return nil
 }
 
-//Migrate create/updates database table
+// Migrate create/updates database table
 func Migrate(table *entity.User) {
 	Connector.AutoMigrate(&table)
 	log.Println("Table migrated")

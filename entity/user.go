@@ -1,6 +1,6 @@
 package entity
 
-//Person object for REST(CRUD)
+// User Object
 type User struct {
 	ID            int64   `json:"id"`
 	Name          string  `json:"name"`
@@ -9,6 +9,7 @@ type User struct {
 	Modified_time string  `json:"modified_time"`
 }
 
+// Transaction Object
 type ChangeBalance struct {
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`

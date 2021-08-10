@@ -130,7 +130,7 @@ func TestDeleteUserByID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req = mux.SetURLVars(req, map[string]string{"id": "14"})
+	req = mux.SetURLVars(req, map[string]string{"id": "1"})
 	w := httptest.NewRecorder()
 	handler := http.HandlerFunc(DeleteUserByID)
 	handler.ServeHTTP(w, req)
