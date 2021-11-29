@@ -1,13 +1,23 @@
 package main
 
 import (
+	"SuperBank/controllers"
+	"SuperBank/entity"
+	"fmt"
 	"log"
 	"net/http"
-	"rest-go-demo/controllers"
 
 	"github.com/gorilla/mux"
-	_ "github.com/jinzhu/gorm/dialects/mysql" //Required for MySQL dialect
 )
+
+const minBalance float32 = -1 // Minimum balance of an Account
+const minCost float32 = 1     // Minimum amount to trade in a transaction
+const maxWorker = 10
+const maxTransaction = 1000
+const maxAccount = 1000
+
+var trans chan entity.Transaction
+var accounts chan []entity.Account
 
 func main() {
 
@@ -15,21 +25,34 @@ func main() {
 
 	router := mux.NewRouter().StrictSlash(true)
 	initaliseHandlers(router)
+
+	trans = make(chan entity.Transaction, maxTransaction)
+	accounts = make(chan []entity.Account, maxAccount)
+
+	for i := 0; i < maxWorker; i++ {
+		fmt.Printf("Worker %v is waiting ..... ! \n", i+1)
+		go func() {
+			controllers.Worker(trans, accounts)
+		}()
+	}
+
 	log.Fatal(http.ListenAndServe(":8000", router))
+
 }
 
 func initaliseHandlers(router *mux.Router) {
-	router.HandleFunc("/create", controllers.CreateUser).Methods("POST")
-	router.HandleFunc("/creates", controllers.CreateUserFromCSV).Methods("POST")
-	router.HandleFunc("/transfer", controllers.UserTransfer).Methods("PUT")
-	router.HandleFunc("/get", controllers.GetAllUser).Methods("GET")
-	router.HandleFunc("/get/{id}", controllers.GetUserByID).Methods("GET")
-	router.HandleFunc("/update", controllers.UpdateUserByID).Methods("PUT")
-	router.HandleFunc("/delete/{id}", controllers.DeleteUserByID).Methods("DELETE")
-	router.HandleFunc("/delete", controllers.DeleteUserByID).Methods("DELETE")
-	router.HandleFunc("/withdraw", controllers.UserWithdraw).Methods("PUT")
-	router.HandleFunc("/deposit", controllers.UserDeposit).Methods("PUT")
-	router.HandleFunc("/transfer", controllers.UserTransfer).Methods("PUT")
-	router.HandleFunc("/transfers", controllers.UserTransferFromCSV).Methods("PUT")
+	router.HandleFunc("/create", controllers.CreateAccount).Methods("POST")
+	router.HandleFunc("/creates", controllers.CreateAccountFromCSV).Methods("POST")
+	router.HandleFunc("/transfer", controllers.AccountTransfer).Methods("PUT")
+	router.HandleFunc("/get", controllers.GetAllAccount).Methods("GET")
+	router.HandleFunc("/get/{id}", controllers.GetAccountByID).Methods("GET")
+	router.HandleFunc("/update", controllers.UpdateAccountByID).Methods("PUT")
+	router.HandleFunc("/delete/{id}", controllers.DeleteAccountByID).Methods("DELETE")
+	router.HandleFunc("/delete", controllers.DeleteAccountByID).Methods("DELETE")
+	router.HandleFunc("/withdraw", controllers.AccountWithdraw).Methods("PUT")
+	router.HandleFunc("/deposit", controllers.AccountDeposit).Methods("PUT")
+	router.HandleFunc("/transfer", controllers.AccountTransfer).Methods("PUT")
+	router.HandleFunc("/transfers", controllers.AccountTransferFromCSV).Methods("PUT")
+	router.HandleFunc("/transfers_CC", controllers.AccountTransfer_CC).Methods("PUT")
 
 }
