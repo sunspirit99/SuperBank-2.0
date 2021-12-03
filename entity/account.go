@@ -4,18 +4,22 @@ import "time"
 
 // Account Object
 type Account struct {
-	Id          uint64     `json:id gorm:"primary_key"`
-	Name        string     `json:name`
-	Address     string     `json:address`
-	PhoneNumber string     `json:phonenumber`
-	Balance     float32    `json:balance`
-	Status      int        `json:status`
-	Createtime  *time.Time `json:createtime`
+	Id          string  `json:id gorm:"primary_key"`
+	Name        string  `json:name`
+	Address     string  `json:address`
+	PhoneNumber string  `json:phonenumber`
+	Balance     float32 `json:balance`
+	Status      int     `json:status`
+	Createtime  string  `json:createtime`
 }
 
 // Transaction Object
 type Transaction struct {
-	From   uint64  `json:"from"`
-	To     uint64  `json:"to"`
-	Amount float32 `json:"amount"`
+	Trace      string     `json:trace gorm:"PRIMARY_KEY"`
+	TxID       string     `json:txid`
+	From       string     `json:"from"`
+	To         string     `json:"to"`
+	Amount     float32    `json:"amount"`
+	Status     int        `json:"status"`
+	Createtime *time.Time `json:"createtime"`
 }

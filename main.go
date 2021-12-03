@@ -10,14 +10,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
-const minBalance float32 = -1 // Minimum balance of an Account
-const minCost float32 = 1     // Minimum amount to trade in a transaction
 const maxWorker = 10
 const maxTransaction = 1000
 const maxAccount = 1000
 
 var trans chan entity.Transaction
 var accounts chan []entity.Account
+var channelName string = "mychannel"
+var contractName string = "basic"
 
 func main() {
 
@@ -39,7 +39,6 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8000", router))
 
 }
-
 func initaliseHandlers(router *mux.Router) {
 	router.HandleFunc("/create", controllers.CreateAccount).Methods("POST")
 	router.HandleFunc("/creates", controllers.CreateAccountFromCSV).Methods("POST")

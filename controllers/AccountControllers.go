@@ -3,6 +3,7 @@ package controllers
 import (
 	"SuperBank/database"
 	"SuperBank/entity"
+	"SuperBank/fabric"
 	"bufio"
 	"encoding/csv"
 	"encoding/json"
@@ -15,17 +16,23 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gorilla/mux"
-	"gorm.io/gorm"
+	"github.com/hyperledger/fabric-sdk-go/pkg/gateway"
 )
 
 const minBalance float32 = 1 // Minimum balance of an Account
 const minCost float32 = 1    // Minimum amount to trade in a transaction
 const batchsize int = 1000   // the number of records in a single write to the database
-const loop int = 10
+// const loop int = 10
+
+var channelName string = "mychannel"
+var contractName string = "basic"
 
 var trans chan entity.Transaction
 var accounts chan []entity.Account
+var gw *gateway.Gateway
 
 // GetAllAccount get all Account data
 func GetAllAccount(w http.ResponseWriter, r *http.Request) {
@@ -66,21 +73,45 @@ func GetAccountByID(w http.ResponseWriter, r *http.Request) {
 //CreateAccount creates an Account
 func CreateAccount(w http.ResponseWriter, r *http.Request) {
 
+	var db = database.Connector
+	var Account entity.Account
 	w.Header().Set("Content-Type", "application/json")
 	requestBody, _ := ioutil.ReadAll(r.Body) // read JSON data from Body
 
-	var Account entity.Account
 	json.Unmarshal(requestBody, &Account) // Convert from JSON format to Account Format
 
-	error := database.Connector.Create(Account).Error // Create a record in database
-	if error != nil {
-		fmt.Println("Failed to create account !")
-	} else {
+	gw = fabric.InitGateway()
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(Account)
-		w.WriteHeader(http.StatusCreated)
+	network, err := gw.GetNetwork(channelName)
+	if err != nil {
+		fmt.Println("Failed to get network")
 	}
+
+	id := Account.Id
+	name := Account.Name
+	address := Account.Address
+	phonenumber := Account.PhoneNumber
+	balance := fmt.Sprintf("%f", Account.Balance)
+	status := strconv.Itoa(Account.Status)
+
+	contract := network.GetContract(contractName)
+
+	response, err := contract.SubmitTransaction("CreateAccount", id, name, address, phonenumber, balance, status)
+	if err != nil {
+		log.Fatalln("Failed to create account in fabric network !", err)
+	}
+
+	fmt.Println("Response from Fabric : ", string(response.Responses[0].Response.Payload))
+
+	Account.Createtime = time.Now().String()
+	error := db.Create(Account).Error // Create a record in database
+	if error != nil {
+		log.Fatalln("Failed to create account in mysql !")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(Account)
+	w.WriteHeader(http.StatusCreated)
 
 	// return the created Account in JSON format
 }
@@ -156,44 +187,54 @@ func AccountWithdraw(w http.ResponseWriter, r *http.Request) {
 
 	var Account entity.Account
 	var tx entity.Transaction
+	var db = database.Connector
 
 	requestBody, err := ioutil.ReadAll(r.Body) // read JSON data from Body
 	if err != nil {
-		fmt.Println("Unreadable !!!")
+		panic("Enter all required information !!!")
 	}
 
-	err1 := json.Unmarshal(requestBody, &tx) // Convert from JSON format to Account Format
-	if err1 != nil {
-		fmt.Println("Error")
-	}
-
-	sess := database.Connector.Session((&gorm.Session{PrepareStmt: true}))
-
-	error := sess.First(&Account, tx.From).Error
+	error := json.Unmarshal(requestBody, &tx) // Convert from JSON format to Account Format
 	if error != nil {
-		panic("Query error !")
+		fmt.Println("Error :", error)
 	}
 
-	if Account.Balance < minBalance {
-		// Current balance is less than minimum balance
-		fmt.Println("You dont have enough money to withdraw !")
-		return
-	}
-	if Account.Balance-tx.Amount < minBalance {
-		// Make sure the balance after the transaction is not less than the minimum balance
-		fmt.Println("The maximum amount that can be withdrawn is", Account.Balance-minBalance, "!")
-		return
-	}
-	if tx.Amount < minCost {
-		// Make sure the current trading amount is large the minimum trading amount (1000)
-		fmt.Println("The minimum amount to perform a transaction is", minCost, "!")
-		return
+	tx.Trace = uuid.New().String()
+	// fmt.Print(tx.Trace)
+	now := time.Now()
+	tx.Createtime = &now
+	tx.Status = 0 // processing
+
+	error = db.Create(tx).Error // Create a record in database
+	if error != nil {
+		log.Fatalln("Failed to create transaction in DB !")
 	}
 
-	Withdraw(&Account, tx.Amount) // Change the balance of this Account
-	fmt.Println("You have successfully withdrew", tx.Amount, "from your account !")
+	gw := fabric.InitGateway()
+	network, err := gw.GetNetwork(channelName)
+	if err != nil {
+		fmt.Println("Failed to get network !")
+	}
+	contract := network.GetContract(contractName)
 
-	sess.Model(&Account).Update("balance", Account.Balance) // Update database
+	from := tx.To
+	amount := fmt.Sprintf("%f", tx.Amount)
+
+	response, err := contract.SubmitTransaction("AccountWithdraw", from, amount)
+	if err != nil {
+		fmt.Println("Failed to send proposal !")
+		db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 2, tx.Trace) // status = 2 : Failed
+	} else {
+		payload := response.Responses[0].ProposalResponse.Response.Payload
+		err = json.Unmarshal(payload, &Account)
+		if err != nil {
+			fmt.Println("err :", err)
+		}
+
+		fmt.Println("You have successfully withdrew", tx.Amount, "to your account !")
+		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Account.Balance, Account.Id)
+		db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 1, tx.Trace) // status = 1 : Done
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(Account)
@@ -204,51 +245,6 @@ func AccountWithdraw(w http.ResponseWriter, r *http.Request) {
 func AccountDeposit(w http.ResponseWriter, r *http.Request) {
 	var tx entity.Transaction
 	var Account entity.Account
-
-	requestBody, err := ioutil.ReadAll(r.Body) // read JSON data from Body
-	if err != nil {
-		fmt.Println("Unreadble ")
-	}
-
-	err1 := json.Unmarshal(requestBody, &tx) // Convert from JSON format to Account Format
-	if err1 != nil {
-		fmt.Println("Error")
-	}
-	// fmt.Println(tx)
-
-	sess := database.Connector.Session((&gorm.Session{PrepareStmt: true}))
-
-	error := sess.First(&Account, tx.From).Error
-	// Get Account information to deposit money
-
-	if error != nil {
-		panic("Query error !!!")
-	}
-	if tx.Amount < minCost {
-		// Make sure the current trading amount is large the minimum trading amount (5000)
-		fmt.Println("The minimum amount to perform a transaction is", minCost, "!")
-		return
-	}
-
-	// Deposit(&Account, tx.Amount) // Change the balance of this Account
-	// fmt.Println(Account)
-	fmt.Println("You have successfully deposited", tx.Amount, "to your account !")
-
-	// database.Connector.Save(&Account) // Update database
-	// sess.Model(&Account).Update("balance", Account.Balance)
-	sess.Exec("UPDATE accounts SET balance = ? WHERE id = ?", gorm.Expr("balance + ?", tx.Amount), tx.From)
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Account)
-	// Returns the new state of the Account when the transaction is done
-}
-
-// AccountTransfer transfer money between 2 accounts through a transaction
-func AccountTransfer(w http.ResponseWriter, r *http.Request) {
-	var Accounts []entity.Account
-	// var Account1 entity.Account
-	// var Account2 entity.Account
-	var tx entity.Transaction
 	var db = database.Connector
 
 	requestBody, err := ioutil.ReadAll(r.Body) // read JSON data from Body
@@ -258,70 +254,130 @@ func AccountTransfer(w http.ResponseWriter, r *http.Request) {
 
 	error := json.Unmarshal(requestBody, &tx) // Convert from JSON format to Account Format
 	if error != nil {
-		fmt.Println("Error !")
+		fmt.Println("Error :", error)
 	}
 
-	if tx.From == tx.To {
-		panic("Please enter correct recipient ID !")
+	tx.Trace = uuid.New().String()
+	// fmt.Print(tx.Trace)
+	now := time.Now()
+	tx.Createtime = &now
+	tx.Status = 0 // processing
+
+	error = db.Create(tx).Error // Create a record in database
+	if error != nil {
+		log.Fatalln("Failed to create transaction in DB !")
 	}
 
-	// sess := db.Session((&gorm.Session{PrepareStmt: true}))
-
-	// err = sess.Where("id =? or id =?", tx.From, tx.To).Find(&Accounts).Error
-	err = db.Raw("SELECT balance FROM accounts where id = ? or id = ?", tx.From, tx.To).Limit(2).Scan(&Accounts).Error
-	// err2 := sess.First(&Account2, tx.To).Error
-	fmt.Println("Balance of Founded Accounts :", Accounts[0].Balance, Accounts[1].Balance)
-
+	gw := fabric.InitGateway()
+	network, err := gw.GetNetwork(channelName)
 	if err != nil {
-		panic("Cannot find the record by id !")
+		fmt.Println("Failed to get network !")
+	}
+	contract := network.GetContract(contractName)
+
+	from := tx.To
+	amount := fmt.Sprintf("%f", tx.Amount)
+	response, err := contract.SubmitTransaction("AccountDeposit", from, amount)
+	if err != nil {
+		fmt.Println("Failed to send proposal !")
+		db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 2, tx.Trace) // status = 2 : Failed
+	} else {
+		payload := response.Responses[0].ProposalResponse.Response.Payload
+		err = json.Unmarshal(payload, &Account)
+		if err != nil {
+			fmt.Println("err :", err)
+		}
+
+		fmt.Println("You have successfully deposited", tx.Amount, "to your account !")
+		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Account.Balance, Account.Id)
+		db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 1, tx.Trace) // status = 1 : Done
 	}
 
-	if Accounts[0].Balance < minBalance {
-		// Current balance is less than minimum balance
-		fmt.Println("You dont have enough money to transfer !")
-		return
-	}
-	if Accounts[0].Balance-tx.Amount < minBalance {
-		// Make sure the balance after the transaction is not less than the minimum balance
-		fmt.Println("The maximum amount that can be transferred is", Accounts[0].Balance-minBalance, "!")
-		return
-	}
-	if tx.Amount < minCost {
-		// Make sure the current trading amount is large the minimum trading amount (1000)
-		fmt.Println("The minimum amount that can be transferred is", minCost, "!")
-		return
+	w.Header().Set("Content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Account)
+	// Returns the new state of the Account when the transaction is done
+}
+
+// AccountTransfer transfer money between 2 accounts through a transaction
+func AccountTransfer(w http.ResponseWriter, r *http.Request) {
+	var Accounts []entity.Account
+	var tx entity.Transaction
+	var db = database.Connector
+
+	start := time.Now()
+	gw = fabric.InitGateway()
+
+	requestBody, err := ioutil.ReadAll(r.Body) // read JSON data from Body
+	if err != nil {
+		panic("Enter all required information !!!")
 	}
 
-	fmt.Printf("Pre-Balance : [id=%v] = %v , [id=%v] = %v \n", tx.From, Accounts[0].Balance, tx.To, Accounts[1].Balance)
-	// Accounts[0].Balance -= tx.Amount
-	// Accounts[1].Balance += tx.Amount
-	// Withdraw(&Account1, tx.Amount)
-	// Deposit(&Account2, tx.Amount) // Change the balance of these 2 Accounts
-	db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", gorm.Expr("balance - ?", tx.Amount), tx.From)
-	db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", gorm.Expr("balance + ?", tx.Amount), tx.To)
-	// result := sess.Save(&Accounts)
-	// if result.Error != nil {
-	// 	fmt.Println("Failed to save the records :", error)
-	// }
-	fmt.Printf("Post-Balance : [id=%v] = %v , [id=%v] = %v \n", tx.From, Accounts[0].Balance, tx.To, Accounts[1].Balance)
+	error := json.Unmarshal(requestBody, &tx) // Convert from JSON format to Account Format
+	if error != nil {
+		fmt.Println("Error :", error)
+	}
 
-	// fmt.Println("You [ID :", tx.From, "] have successfully transferred", tx.Amount, "to [ID :", tx.To, "] !")
+	db.Raw("SELECT * from accounts WHERE id = ? or id = ?", tx.From, tx.To).Scan(&Accounts)
+	fmt.Println("Before :", Accounts)
 
-	// fmt.Println("Affected update :", result.RowsAffected, tx.From, tx.To)
-	// fmt.Println("Error Update :", result1.Error, result2.Error)
-	// sess.Save(&Account2)
-	// sess.Model(&entity.Account{}).Update("balance", Account2.Balance) // Update database
+	tx.Trace = uuid.New().String()
+	// fmt.Print(tx.Trace)
+	now := time.Now()
+	tx.Createtime = &now
+	tx.Status = 0 // processing
+
+	error = db.Create(tx).Error // Create a record in database
+	if error != nil {
+		log.Fatalln("Failed to create transaction in DB !")
+	}
+
+	network, err := gw.GetNetwork(channelName)
+	if err != nil {
+		fmt.Println("Failed to get network from gateway !")
+	}
+
+	contract := network.GetContract(contractName)
+
+	from := tx.From
+	to := tx.To
+	amount := strconv.Itoa(int(tx.Amount))
+
+	response, err := contract.SubmitTransaction("AccountTransfer", from, to, amount)
+	if err != nil {
+		fmt.Println("Failed to submit transaction ! Can't update the balance !")
+		db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 2, tx.Trace) // status = 2 : Failed
+	} else {
+		txid := string(response.TransactionID)
+		tx.TxID = txid
+		fmt.Println("txid :", txid)
+		// fmt.Println(string(response.Responses[0].ProposalResponse.Payload))
+		payload := response.Responses[0].ProposalResponse.Response.Payload
+
+		// fmt.Println(string(payload))
+
+		err := json.Unmarshal(payload, &Accounts)
+		if err != nil {
+			fmt.Println("err :", err)
+		}
+		fmt.Println("After :", Accounts)
+
+		db.Exec("UPDATE transactions SET status = ?, tx_id = ? WHERE trace = ?", 1, txid, tx.Trace) // status = 1 : Done
+		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Accounts[0].Balance, tx.From)
+		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Accounts[1].Balance, tx.To)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Accounts)
-	// Returns the new state of 2 Accounts when the transaction is done
+	json.NewEncoder(w).Encode(tx)
+
+	fmt.Println("Execution time :", time.Since(start))
+
 }
 
 func AccountTransfer_CC(w http.ResponseWriter, r *http.Request) {
 
 	var Accounts []entity.Account
-
 	var tx entity.Transaction
 
 	requestBody, err := ioutil.ReadAll(r.Body) // read JSON data from Body
@@ -335,6 +391,7 @@ func AccountTransfer_CC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		fmt.Println("goroutine is processing !")
 		trans <- tx
 	}()
 
@@ -353,39 +410,45 @@ func Worker(trans <-chan entity.Transaction, accounts chan<- []entity.Account) {
 	var Accounts []entity.Account
 	var db = database.Connector
 
+	fmt.Println("Worker is working !")
 	for tx := range trans {
 		if tx.From == tx.To {
-			log.Panicf("Please enter correct recipient ID ! %d and %d", tx.From, tx.To)
+			log.Panicf("Please enter correct recipient ID ! %v and %v", tx.From, tx.To)
 		}
 
-		err := db.Raw("SELECT balance FROM accounts where id = ? or id = ?", tx.From, tx.To).Limit(2).Scan(&Accounts).Error
-		// err2 := sess.First(&Account2, tx.To).Error
-		fmt.Println("Balance of Founded Accounts :", Accounts[0].Balance, Accounts[1].Balance)
-
+		gw := fabric.InitGateway()
+		network, err := gw.GetNetwork(channelName)
 		if err != nil {
-			panic("Cannot find the record by id !")
+			fmt.Println("Failed to get network !")
 		}
 
-		if Accounts[0].Balance < minBalance {
-			// Current balance is less than minimum balance
-			fmt.Println("You dont have enough money to transfer !")
-			return
-		}
-		if Accounts[0].Balance-tx.Amount < minBalance {
-			// Make sure the balance after the transaction is not less than the minimum balance
-			fmt.Println("The maximum amount that can be transferred is", Accounts[0].Balance-minBalance, "!")
-			return
-		}
-		if tx.Amount < minCost {
-			// Make sure the current trading amount is large the minimum trading amount (1000)
-			fmt.Println("The minimum amount that can be transferred is", minCost, "!")
-			return
-		}
+		contract := network.GetContract(contractName)
 
-		fmt.Printf("Pre-Balance : [id=%v] = %v , [id=%v] = %v \n", tx.From, Accounts[0].Balance, tx.To, Accounts[1].Balance)
+		from := tx.From
+		to := tx.To
+		amount := fmt.Sprintf("%f", tx.Amount)
+		response, err := contract.SubmitTransaction("AccountTransfer", from, to, amount)
+		if err != nil {
+			fmt.Println("Failed to submit transaction ! Can't update the balance !")
+			db.Exec("UPDATE transactions SET status = ? WHERE trace = ?", 2, tx.Trace) // status = 2 : Failed
+		} else {
+			txid := string(response.TransactionID)
+			// fmt.Println(len(response.Responses))
+			// fmt.Println(string(response.Responses[0].ProposalResponse.Payload))
+			payload := response.Responses[0].ProposalResponse.Response.Payload
 
-		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", gorm.Expr("balance - ?", tx.Amount), tx.From)
-		db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", gorm.Expr("balance + ?", tx.Amount), tx.To)
+			// fmt.Println(string(payload))
+
+			err := json.Unmarshal(payload, &Accounts)
+			if err != nil {
+				fmt.Println("err :", err)
+			}
+			fmt.Println(Accounts)
+
+			db.Exec("UPDATE transactions SET status = ?, tx_id = ? WHERE trace = ?", 1, txid, tx.Trace) // status = 1 : Done
+			db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Accounts[0].Balance, tx.From)
+			db.Exec("UPDATE accounts SET balance = ? WHERE id = ?", Accounts[1].Balance, tx.To)
+		}
 
 		// time.Sleep(time.Second)
 		accounts <- Accounts
@@ -468,23 +531,23 @@ func LoadAccountsCSV() []entity.Account {
 		if err != nil {
 			log.Fatal(err)
 		}
-		id, err := strconv.ParseInt(line[0], 0, 64)
+
 		balance, err := strconv.ParseFloat(line[4], 32)
 		status, err := strconv.ParseInt(line[5], 0, 64)
-		t := time.Now()
+		// t := time.Now()
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(2)
 		}
 
 		Accounts = append(Accounts, entity.Account{
-			Id:          uint64(id),
+			Id:          line[0],
 			Name:        line[1],
 			Address:     line[2],
 			PhoneNumber: line[3],
 			Balance:     float32(balance),
 			Status:      int(status),
-			Createtime:  &t,
+			Createtime:  "",
 		})
 	}
 	return Accounts
@@ -506,9 +569,9 @@ func LoadTransactionsCSV() []entity.Transaction {
 			log.Fatal(err)
 		}
 
-		from, err := strconv.ParseInt(line[0], 0, 64)
+		// from, err := strconv.ParseInt(line[0], 0, 64)
 		// amount, err := strconv.ParseFloat(line[2], 64)
-		to, err := strconv.ParseInt(line[3], 0, 64)
+		// to, err := strconv.ParseInt(line[3], 0, 64)
 
 		if err != nil {
 			fmt.Println(err)
@@ -516,9 +579,9 @@ func LoadTransactionsCSV() []entity.Transaction {
 		}
 
 		trans = append(trans, entity.Transaction{
-			From:   uint64(from),
+			From:   line[0],
 			Amount: 1000000,
-			To:     uint64(to),
+			To:     line[3],
 		})
 	}
 	return trans

@@ -26,7 +26,8 @@ func init() {
 	if err != nil {
 		panic(err.Error())
 	}
-	Migrate(&entity.Account{})
+	Migrate(&entity.Account{}, &entity.Transaction{})
+
 }
 
 // Connect creates MySQL connection
@@ -46,7 +47,7 @@ func Connect(connectionString string) error {
 }
 
 // Migrate create/updates database table
-func Migrate(table *entity.Account) {
-	Connector.AutoMigrate(&table)
-	log.Println("Table migrated")
+func Migrate(accountTable *entity.Account, transactionTable *entity.Transaction) {
+	Connector.AutoMigrate(&accountTable, &transactionTable)
+	log.Println("Tables migrated")
 }
