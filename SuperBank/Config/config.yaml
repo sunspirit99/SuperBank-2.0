@@ -1,0 +1,15 @@
+ServerName: "localhost:3306"
+User:       "root"
+Password:   "Password@99"
+DB:         "SuperBank"
+
+channelName  : "mychannel"
+contractName : "basic"
+
+maxWorker : 10
+maxTransaction : 1000
+maxAccount : 1000
+
+processing : 0
+success : 1
+fail : 2
